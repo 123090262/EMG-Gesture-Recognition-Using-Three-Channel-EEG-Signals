@@ -1,7 +1,7 @@
 // Example: using timer for ADC
 // Connection: PIN 4 --> ADC1
-// Connection: PIN 35 --> ADC2
-// Connection: PIN 36 --> ADC3
+// Connection: PIN 5 --> ADC2
+// Connection: PIN 6 --> ADC3
 
 #define PIN_SIGNAL_1 4
 #define PIN_SIGNAL_2 5
@@ -62,8 +62,8 @@ void loop() {
 	}
 	val1_cnt = cnt;
 	val2_adc = analogRead(PIN_SIGNAL_1);
-    val3_adc = analogRead(PIN_SIGNAL_2); // <--- 读取 GPIO 9
-    val4_adc = analogRead(PIN_SIGNAL_3); // <--- 读取 GPIO 11
+    val3_adc = analogRead(PIN_SIGNAL_2); // GPIO 5
+    val4_adc = analogRead(PIN_SIGNAL_3); // GPIO 6
 
 	//----B 发送数据----
 	//协议总长10字节[13，10，data*4]
