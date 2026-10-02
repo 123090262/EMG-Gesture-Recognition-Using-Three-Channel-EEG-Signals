@@ -13,7 +13,9 @@ winInc = round(WinIncMs * Fs / 1000);
 classNames = {'Rest', 'Fist', 'Grasp', 'Scissor'};
 classLabels = [1, 2, 3, 4]; % 对应标签 ID
 
-dataRootDir = 'MyEMGData';
+scriptDir = fileparts(mfilename('fullpath'));
+dataRootDir = fullfile(scriptDir, '..', 'data', 'raw');
+modelOutputPath = fullfile(scriptDir, 'MyTrainedModel.mat');
 
 %% 2. 遍历文件读取与特征提取
 featureMatrix = []; % 特征 X
@@ -157,8 +159,8 @@ trainedModelData.classNames = classNames;
 trainedModelData.threshold = ZC_Threshold;
 
 
-save('MyTrainedModel.mat', 'trainedModelData');
-fprintf('Model and parameters are saved as "MyTrainedModel.mat" ');
+save(modelOutputPath, 'trainedModelData');
+fprintf('Model and parameters are saved as "%s" ', modelOutputPath);
 %% === 4.5 特征与标签关联强度可视化（深蓝风格） ===
 fprintf('Computing feature–label association...\n');
 
