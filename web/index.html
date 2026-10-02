@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>EMG Compact</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* 1. 滚动优化：底部留白减少至 90px */
+        body {
+            background-color: #020617;
+            color: #e2e8f0;
+            font-family: -apple-system, sans-serif;
+            padding-bottom: 100px;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .card {
+            background-color: #1e293b;
+            border: 1px solid #334155;
+            border-radius: 12px;
+            overflow: hidden;
+            /* margin-bottom 减小 */
+            margin-bottom: 8px;
+        }
+
+        /* 2. 波形图高度压缩：从 140px 改为 100px */
+        .chart-box {
+            position: relative;
+            height: 100px;
+            background: #0f172a;
+            border-bottom: 1px solid #1e293b;
+        }
+        .chart-box:last-child { border-bottom: none; }
+        canvas { display: block; width: 100%; height: 100%; }
+
+        .tag {
+            position: absolute; top: 4px; left: 6px;
+            font-size: 0.6rem; font-weight: bold; font-family: monospace;
+            background: rgba(0,0,0,0.6); padding: 1px 4px; border-radius: 3px;
+            pointer-events: none; z-index: 10;
+        }
+
+        /* 底部固定栏更加紧凑 */
+        .fixed-footer {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(10px);
+            border-top: 1px solid #334155;
+            padding: 10px;
+            z-index: 50;
+            display: flex; gap: 8px;
+        }
+
+        .btn {
+            display: flex; align-items: center; justify-content: center;
+            font-weight: bold; border-radius: 8px; transition: all 0.2s;
+        }
+        .btn:active { transform: scale(0.96); }
+        .btn:disabled { opacity: 0.5; filter: grayscale(1); }
+    </style>
+</head>
+<body class="p-2"> <!-- 页面边距减小 -->
+
+    <!-- 1. 顶部：连接与状态 (更紧凑) -->
+    <div class="card p-2 flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2">
+            <h1 class="text-sm font-bold text-white whitespace-nowrap">EMG Sys</h1>
+            <div id="statusTag" class="text-[10px] bg-slate-800 text-slate-400 px-1 rounded border border-slate-700">
+                Disc.
+            </div>
+        </div>
+        <div class="flex gap-1 flex-1 justify-end">
+            <input type="text" id="wsUrl" value="ws://192.168.4.1:81"
+                   class="w-24 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-xs font-mono text-blue-300">
+            <button id="btnConn" onclick="toggleConnection()"
+                    class="btn bg-blue-600 text-white px-3 py-1 text-xs whitespace-nowrap">
+                连接
+            </button>
+        </div>
+    </div>
+
+    <!-- 2. 中部：识别结果与模型 (高度大幅压缩) -->
+    <!-- 改为 Grid 布局，左边占 7 份，右边占 5 份 -->
+    <div class="grid grid-cols-12 gap-2 mb-2 h-20"> <!-- 固定高度 h-20 (80px) -->
+
+        <!-- 结果大屏 (左侧) -->
+        <div class="col-span-7 card p-2 flex flex-row items-center justify-between relative">
+            <div class="absolute top-1 left-2 text-[8px] text-slate-500 uppercase tracking-widest font-bold">Prediction</div>
+
+            <!-- 图标变小 -->
+            <div id="gestureIcon" class="text-3xl ml-1">✋</div>
+
+            <div class="text-right z-10">
+                <!-- 文字变小 -->
+                <div id="gestureText" class="text-lg font-black text-slate-500 leading-tight">---</div>
+                <div class="text-[10px] text-slate-400 font-mono mt-1">
+                    Conf: <span id="voteCount">0</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- 模型与采样率 (右侧，上下排列) -->
+        <div class="col-span-5 flex flex-col gap-1 h-full">
+            <!-- 加载按钮 -->
+            <label class="card flex-1 flex flex-row items-center justify-center gap-2 cursor-pointer hover:bg-slate-800 transition mb-0 px-1">
+                <span class="text-lg">📂</span>
+                <div class="overflow-hidden">
+                    <div class="text-[10px] text-blue-400 font-bold leading-none">Load Model</div>
+                    <div id="modelName" class="text-[8px] text-slate-500 truncate w-16 leading-none mt-1">None</div>
+                </div>
+                <input type="file" accept=".json" class="hidden" onchange="loadModel(this)">
+            </label>
+
+            <!-- 采样率 -->
+            <div class="card flex-1 flex flex-row items-center justify-between px-2 py-1 mb-0">
+                <span class="text-[10px] text-slate-500">FPS</span>
+                <span class="text-sm font-mono text-emerald-400 font-bold"><span id="fps">0</span></span>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. 波形显示 (每行 100px) -->
+    <div class="card overflow-hidden">
+        <div class="chart-box">
+            <span class="tag text-cyan-400">CH1</span>
+            <canvas id="c1"></canvas>
+        </div>
+        <div class="chart-box">
+            <span class="tag text-emerald-400">CH2</span>
+            <canvas id="c2"></canvas>
+        </div>
+        <div class="chart-box">
+            <span class="tag text-purple-400">CH3</span>
+            <canvas id="c3"></canvas>
+        </div>
+    </div>
+
+    <!-- 4. 底部控制栏 (更矮) -->
+    <div class="fixed-footer safe-area-bottom">
+        <button id="btnRec" onclick="handleRecord()" disabled
+                class="btn flex-1 bg-slate-800 text-slate-300 py-2 text-sm border border-slate-700 shadow-lg">
+            🔴 Record
+        </button>
+        <button id="btnStop" onclick="togglePlot()" disabled
+                class="btn w-20 bg-slate-800 text-slate-400 text-sm border border-slate-700">
+            ⏹ Stop
+        </button>
+    </div>
+
+    <script>
+        // ================= CONFIG (Strictly Match MATLAB) =================
+        const CONFIG = {
+            sampleRate: 1000,
+            adcMax: 4095,
+            adcRef: 3.3,
+            plotPoints: 1500,
+            packetSize: 8
+        };
+
+        const LABELS = {
+            1: { name: "休息", icon: "✋", color: "text-slate-400" },
+            2: { name: "握拳", icon: "✊", color: "text-red-500" },
+            3: { name: "抓握", icon: "🤏", color: "text-green-500" },
+            4: { name: "剪刀", icon: "✌️", color: "text-yellow-400" }
+        };
+
+        const state = {
+            ws: null, connected: false,
+            recording: false, hasData: false, plotting: true,
+            buffer: [], plotHead: 0,
+            plotData: [new Float32Array(CONFIG.plotPoints), new Float32Array(CONFIG.plotPoints), new Float32Array(CONFIG.plotPoints)],
+            winData: [[], [], []], step: 0, model: null,
+            lastTime: 0, fpsCount: 0
+        };
+
+        const ui = {
+            btnConn: document.getElementById('btnConn'),
+            status: document.getElementById('statusTag'),
+            gestureText: document.getElementById('gestureText'),
+            gestureIcon: document.getElementById('gestureIcon'),
+            voteCount: document.getElementById('voteCount'),
+            fps: document.getElementById('fps'),
+            modelName: document.getElementById('modelName'),
+            canvases: [
+                document.getElementById('c1').getContext('2d', {alpha: false}),
+                document.getElementById('c2').getContext('2d', {alpha: false}),
+                document.getElementById('c3').getContext('2d', {alpha: false})
+            ]
+        };
+        const btnRecReal = document.getElementById('btnRec');
+
+        // ================= 1. Connection =================
+        function toggleConnection() {
+            if (state.connected) { state.ws.close(); return; }
+            ui.btnConn.innerText = "..."; ui.btnConn.disabled = true;
+
+            try {
+                state.ws = new WebSocket(document.getElementById('wsUrl').value);
+                state.ws.binaryType = 'arraybuffer';
+                state.ws.onopen = () => {
+                    state.connected = true;
+                    ui.btnConn.innerText = "断开"; ui.btnConn.className = "btn bg-slate-700 text-white px-3 py-1 text-xs";
+                    ui.status.innerText = "Conn"; ui.status.className = "text-[10px] bg-emerald-900 text-emerald-400 px-1 rounded border border-emerald-700";
+                    btnRecReal.disabled = false; document.getElementById('btnStop').disabled = false;
+                    drawLoop();
+                };
+                state.ws.onclose = () => {
+                    state.connected = false;
+                    ui.btnConn.innerText = "连接"; ui.btnConn.className = "btn bg-blue-600 text-white px-3 py-1 text-xs";
+                    ui.status.innerText = "Disc"; ui.status.className = "text-[10px] bg-slate-800 text-slate-400 px-1 rounded border border-slate-700";
+                    ui.btnConn.disabled = false; btnRecReal.disabled = true; document.getElementById('btnStop').disabled = true;
+                };
+                state.ws.onerror = () => { state.ws.close(); };
+                state.ws.onmessage = (e) => processPacket(e.data);
+            } catch (e) { alert("URL Error"); ui.btnConn.disabled = false; }
+        }
+
+        // ================= 2. Process =================
+        function processPacket(buf) {
+            if (buf.byteLength % CONFIG.packetSize !== 0) return;
+            const cnt = buf.byteLength / CONFIG.packetSize;
+            const view = new DataView(buf);
+            const toVolts = CONFIG.adcRef / CONFIG.adcMax;
+
+            for (let i = 0; i < cnt; i++) {
+                const off = i * CONFIG.packetSize;
+                const pktCnt = view.getUint16(off, true);
+                const r1 = view.getUint16(off + 2, true);
+                const r2 = view.getUint16(off + 4, true);
+                const r3 = view.getUint16(off + 6, true);
+
+                state.fpsCount++;
+
+                if (state.recording) state.buffer.push([Date.now(), pktCnt, r1, r2, r3]);
+                if (state.plotting) {
+                    const h = state.plotHead;
+                    state.plotData[0][h] = r1; state.plotData[1][h] = r2; state.plotData[2][h] = r3;
+                    state.plotHead = (h + 1) % CONFIG.plotPoints;
+                }
+
+                if (state.model) {
+                    state.winData[0].push(r1 * toVolts);
+                    state.winData[1].push(r2 * toVolts);
+                    state.winData[2].push(r3 * toVolts);
+                    if (state.winData[0].length > state.model.winLen) {
+                        state.winData[0].shift(); state.winData[1].shift(); state.winData[2].shift();
+                    }
+                    state.step++;
+                    if (state.step >= 50 && state.winData[0].length >= state.model.winLen) {
+                        state.step = 0; predict();
+                    }
+                }
+            }
+        }
+
+        // ================= 3. Feature & Predict (Core Fix) =================
+        function getFeatures(data, threshold) {
+            let mavs=[], wls=[], zcs=[], sscs=[];
+            let debugMean = 0;
+
+            data.forEach((ch, idx) => {
+                const len = ch.length;
+                let sum = 0; for(let x of ch) sum += x;
+                const mean = sum / len; // Force Zero-Centering
+                if(idx===0) debugMean = mean;
+
+                const centered = new Float32Array(len);
+                for(let i=0; i<len; i++) centered[i] = ch[i] - mean;
+
+                let mav=0, wl=0, zc=0, ssc=0;
+                for(let x of centered) mav += Math.abs(x);
+                mav /= len;
+
+                for(let i=0; i<len-1; i++) {
+                    const curr = centered[i];
+                    const next = centered[i+1];
+                    const diff = next - curr;
+                    wl += Math.abs(diff);
+                    if ((curr * next < 0) && (Math.abs(diff) > threshold)) zc++;
+                    if (i > 0) {
+                        const prev = centered[i-1];
+                        const isPeak = ((curr > prev && curr > next) || (curr < prev && curr < next));
+                        const isLarge = (Math.abs(curr - prev) > threshold) || (Math.abs(curr - next) > threshold);
+                        if (isPeak && isLarge) ssc++;
+                    }
+                }
+                mavs.push(mav); wls.push(wl); zcs.push(zc); sscs.push(ssc);
+            });
+
+            // Diagnostics
+            if (Math.random() < 0.01 && state.model.mu) {
+                console.log(`DC:${debugMean.toFixed(2)} | MAV:${mavs[0].toFixed(4)} | Mu:${state.model.mu[0].toFixed(4)}`);
+            }
+            return [...mavs, ...wls, ...zcs, ...sscs];
+        }
+
+        function predict() {
+            try {
+                let f = getFeatures(state.winData, state.model.threshold);
+                if (state.model.mu) {
+                    for(let i=0; i<f.length; i++) f[i] = (f[i] - state.model.mu[i]) / state.model.sigma[i];
+                }
+
+                const numCls = state.model.classNames.length;
+                const votes = new Array(numCls).fill(0);
+
+                for(let i=0; i<state.model.weights.length; i++) {
+                    let score = Array.isArray(state.model.biases[i]) ? state.model.biases[i][0] : state.model.biases[i];
+                    for(let j=0; j<f.length; j++) {
+                        let w = Array.isArray(state.model.weights[i][j]) ? state.model.weights[i][j][0] : state.model.weights[i][j];
+                        score += f[j] * w;
+                    }
+                    const sign = score > 0 ? 1 : -1;
+                    for(let c=0; c<numCls; c++) {
+                        if (state.model.codingMatrix[c][i] === sign) { votes[c]++; break; }
+                    }
+                }
+
+                let maxV = -1, winIdx = 0;
+                for(let c=0; c<numCls; c++) { if (votes[c] > maxV) { maxV = votes[c]; winIdx = c; } }
+
+                const id = state.model.classNames[winIdx];
+                const info = LABELS[id] || { name: `${id}`, icon: "?", color: "text-white" };
+
+                ui.gestureIcon.innerText = info.icon;
+                ui.gestureText.innerText = info.name;
+                ui.gestureText.className = `text-lg font-black transition-colors ${info.color}`;
+                ui.voteCount.innerText = maxV;
+
+            } catch (e) {}
+        }
+
+        // ================= 4. UI Logic =================
+        function loadModel(input) {
+            const f = input.files[0]; if(!f) return;
+            const r = new FileReader();
+            r.onload = e => {
+                try {
+                    const d = JSON.parse(e.target.result);
+                    if (!d.mu) alert("Bad JSON: No Mu/Sigma");
+                    state.model = d;
+                    ui.modelName.innerText = f.name;
+                    ui.modelName.className = "text-[8px] text-green-400 truncate w-16 leading-none mt-1";
+                } catch(e) { alert("Err"); }
+            };
+            r.readAsText(f);
+        }
+
+        function handleRecord() {
+            if (!state.recording) {
+                if (!state.hasData) {
+                    state.recording = true; state.buffer = [];
+                    btnRecReal.innerText = "⏹ Stop";
+                    btnRecReal.className = "btn flex-1 bg-red-600 text-white py-2 text-sm border border-red-500 animate-pulse";
+                } else saveCsv();
+            } else {
+                state.recording = false; state.hasData = true;
+                btnRecReal.innerText = "💾 Save";
+                btnRecReal.className = "btn flex-1 bg-emerald-600 text-white py-2 text-sm border border-emerald-500";
+            }
+        }
+
+        function saveCsv() {
+            let c = "Time,Count,CH1,CH2,CH3\n";
+            state.buffer.forEach(r => c += r.join(",")+"\n");
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(new Blob([c],{type:'text/csv'}));
+            a.download = `EMG_${Date.now()}.csv`; a.click();
+            state.buffer=[]; state.hasData=false;
+            btnRecReal.innerText = "🔴 Record";
+            btnRecReal.className = "btn flex-1 bg-slate-800 text-slate-300 py-2 text-sm border border-slate-700";
+        }
+
+        function togglePlot() {
+            state.plotting = !state.plotting;
+            document.getElementById('btnStop').innerText = state.plotting ? "⏹ Stop" : "▶ Run";
+        }
+
+        function drawLoop() {
+            if (!state.connected) return;
+            requestAnimationFrame(drawLoop);
+            const now = performance.now();
+            if (now - state.lastTime >= 1000) {
+                ui.fps.innerText = state.fpsCount; state.fpsCount = 0; state.lastTime = now;
+            }
+            if (!state.plotting) return;
+            const w = ui.canvases[0].canvas.clientWidth;
+            const h = ui.canvases[0].canvas.clientHeight;
+            const cols = ['#22d3ee', '#34d399', '#c084fc'];
+
+            ui.canvases.forEach((ctx, i) => {
+                if(ctx.canvas.width!==w) ctx.canvas.width=w;
+                if(ctx.canvas.height!==h) ctx.canvas.height=h;
+                ctx.fillStyle = "#0f172a"; ctx.fillRect(0,0,w,h);
+                ctx.beginPath(); ctx.strokeStyle = cols[i]; ctx.lineWidth = 1.5;
+                const d = state.plotData[i], head = state.plotHead, step = w/CONFIG.plotPoints;
+                let first = true;
+                for(let j=0; j<CONFIG.plotPoints; j+=2) {
+                    if(Math.abs(j-head)<4) continue;
+                    const y = h - (d[j]/CONFIG.adcMax)*h;
+                    if(first) { ctx.moveTo(j*step, y); first=false; } else ctx.lineTo(j*step, y);
+                }
+                ctx.stroke();
+                ctx.beginPath(); ctx.strokeStyle='rgba(255,255,255,0.1)';
+                ctx.moveTo(head*step,0); ctx.lineTo(head*step,h); ctx.stroke();
+            });
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,25 @@
+# MATLAB generated files
+*.asv
+*.autosave
+*.m~
+codegen/
+slprj/
+*.slxc
+*.mex*
+
+# Local exports and temporary recordings
+exports/
+tmp/
+*.tmp
+
+# IDE and operating-system metadata
+.idea/
+.theia/
+.vscode/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local worktrees
+.worktrees/
+worktrees/
